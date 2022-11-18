@@ -67,9 +67,9 @@ class QueuedTask {
 }
 
 abstract class TaskChooser {
-  void makeAvailable(Task task);
+  void makeAvailable(WorkingClock workingClock, Task task);
 
-  Task choose();
+  Task choose(WorkingClock workingClock);
 }
 
 enum TaskChooserMode {
@@ -89,12 +89,12 @@ class FirstTaskChooser extends TaskChooser {
   Queue<Task> available = Queue<Task>();
 
   @override
-  Task choose() {
+  Task choose(WorkingClock workingClock) {
     return available.removeFirst();
   }
 
   @override
-  void makeAvailable(Task task) {
+  makeAvailable(WorkingClock workingClock, Task task) {
     available.addLast(task);
   }
 }
@@ -103,15 +103,47 @@ class ShortestTaskChooser extends TaskChooser {
   PriorityQueue<Task> queue = PriorityQueue<Task>((a, b) => b.duration - a.duration);
 
   @override
-  Task choose() {
+  Task choose(WorkingClock workingClock) {
     return queue.removeFirst();
   }
 
   @override
-  void makeAvailable(Task task) {
+  void makeAvailable(WorkingClock workingClock, Task task) {
     queue.add(task);
   }
 }
+
+class ArronTask {
+  final Task task;
+  final int workStart;
+
+  ArronTask(this.task, this.workStart);
+}
+
+class ArronTaskChooser extends TaskChooser {
+  List<ArronTask> arron = [];
+
+  @override
+  Task choose(WorkingClock workingClock) {
+    int? bestIndex;
+    int? bestScore;
+    for (int i = 0; i < arron.length; i++) {
+      ArronTask task = arron[i];
+      int score = task.task.duration - (workingClock.workedTime - task.workStart);
+      if (bestScore == null || score < bestScore) {
+        bestIndex = i;
+        bestScore = score;
+      }
+    }
+    return arron.removeAt(bestIndex!).task;
+  }
+
+  @override
+  void makeAvailable(WorkingClock workingClock, Task task) {
+    arron.add(ArronTask(task, workingClock.workedTime));
+  }
+}
+
 class WorkingClock {
   static const int workStart = 9 * 60;
   static const int workEnd = 17 * 60;
@@ -119,11 +151,13 @@ class WorkingClock {
   static const int freeTime = fullDay - workingTime;
 
   int time = 0;
+  int workedTime = 0;
   int dayTimeLeft = 0;
 
   //TODO optimise
   void work(QueuedTask task) {
     int duration = task.duration();
+    workedTime += duration;
     while (true) {
       int work = min(dayTimeLeft, duration);
       task.sessions.add(TaskDisplay(task, Time(time), Time(time + work)));
@@ -168,7 +202,7 @@ class TaskSimulation {
       int? after;
       while ((after = allTasks.firstKeyAfter(lastTask)) != null && after! <= clock.time) {
         List<Task> add = allTasks[after]!;
-        add.forEach(taskChooser.makeAvailable);
+        add.forEach((element) => taskChooser.makeAvailable(clock, element));
         lastTask = after;
         available += add.length;
       }
@@ -176,7 +210,7 @@ class TaskSimulation {
         clock.skipTo(after!);
         continue;
       }
-      QueuedTask task = QueuedTask(taskChooser.choose(), clock.time);
+      QueuedTask task = QueuedTask(taskChooser.choose(clock), clock.time);
       available--;
       clock.work(task);
       finished.add(task);
