@@ -64,6 +64,18 @@ class QueuedTask {
   int duration() {
     return task.duration;
   }
+
+  int totalDuration() {
+    return duration() + _waitTime();
+  }
+
+  int _waitTime() {
+    return at - task.start.time;
+  }
+
+  double ratio() {
+    return duration() / totalDuration();
+  }
 }
 
 abstract class TaskChooser {
@@ -73,7 +85,7 @@ abstract class TaskChooser {
 }
 
 enum TaskChooserMode {
-  first, shortest;
+  first, shortest, arron;
 
   TaskChooser create() {
     switch (this) {
@@ -81,6 +93,8 @@ enum TaskChooserMode {
         return FirstTaskChooser();
       case TaskChooserMode.shortest:
         return ShortestTaskChooser();
+      case TaskChooserMode.arron:
+        return ArronTaskChooser();
     }
   }
 }
@@ -100,7 +114,7 @@ class FirstTaskChooser extends TaskChooser {
 }
 
 class ShortestTaskChooser extends TaskChooser {
-  PriorityQueue<Task> queue = PriorityQueue<Task>((a, b) => b.duration - a.duration);
+  PriorityQueue<Task> queue = PriorityQueue<Task>((a, b) => a.duration - b.duration);
 
   @override
   Task choose(WorkingClock workingClock) {
@@ -114,32 +128,43 @@ class ShortestTaskChooser extends TaskChooser {
 }
 
 class ArronTask {
+  static const double multiplierPerMinute = 1 / 3000;
+
   final Task task;
   final int workStart;
 
   ArronTask(this.task, this.workStart);
+
+  double score(WorkingClock clock, int totalQueueTime) {
+    double multiplier = 5 + totalQueueTime * multiplierPerMinute;
+    return task.duration * multiplier - (clock.workedTime - workStart);
+  }
 }
 
 class ArronTaskChooser extends TaskChooser {
   List<ArronTask> arron = [];
+  int totalQueueTime = 0;
 
   @override
   Task choose(WorkingClock workingClock) {
     int? bestIndex;
-    int? bestScore;
+    double? bestScore;
     for (int i = 0; i < arron.length; i++) {
       ArronTask task = arron[i];
-      int score = task.task.duration - (workingClock.workedTime - task.workStart);
+      double score = task.score(workingClock, totalQueueTime);
       if (bestScore == null || score < bestScore) {
         bestIndex = i;
         bestScore = score;
       }
     }
-    return arron.removeAt(bestIndex!).task;
+    Task task = arron.removeAt(bestIndex!).task;
+    totalQueueTime -= task.duration;
+    return task;
   }
 
   @override
   void makeAvailable(WorkingClock workingClock, Task task) {
+    totalQueueTime += task.duration;
     arron.add(ArronTask(task, workingClock.workedTime));
   }
 }
@@ -201,10 +226,11 @@ class TaskSimulation {
     while (finished.length != totalTasks) {
       int? after;
       while ((after = allTasks.firstKeyAfter(lastTask)) != null && after! <= clock.time) {
-        List<Task> add = allTasks[after]!;
-        add.forEach((element) => taskChooser.makeAvailable(clock, element));
+        for (var element in allTasks[after]!) {
+          taskChooser.makeAvailable(clock, element);
+          available += 1;
+        }
         lastTask = after;
-        available += add.length;
       }
       if (available == 0) {
         clock.skipTo(after!);

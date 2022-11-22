@@ -1,6 +1,7 @@
 import 'dart:collection';
 import 'dart:math';
 
+import 'package:fahrradwerkstatt/statistics.dart';
 import 'package:fahrradwerkstatt/task.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -175,8 +176,17 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   void applyTasks(SplayTreeMap<int, List<Task>> tasks, int totalTasks) {
+    for (mode in TaskChooserMode.values) {
+      print("**${mode.name}**");
+      TaskSimulation simulation = TaskSimulation(tasks, mode.create(), totalTasks);
+      simulation.simulate();
+      Statistics(simulation.finished).printStatitics();
+      print("");
+    }
+
     TaskSimulation simulation = TaskSimulation(tasks, mode.create(), totalTasks);
     simulation.simulate();
+    //Statistics(simulation.finished).printStatitics();
     setState(() {
       _selected = _now;
       _tasks = simulation.finished
